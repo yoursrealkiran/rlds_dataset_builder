@@ -25,17 +25,17 @@ class ThreadInHoleV2(tfds.core.GeneratorBasedBuilder):
             features=tfds.features.FeaturesDict({
                 'steps': tfds.features.Dataset({
                     'observation': tfds.features.FeaturesDict({
-                        'image': tfds.features.Image(
-                            shape=(64, 64, 3),
+                        'left_image': tfds.features.Image(
+                            shape=(960, 540, 3),
                             dtype=np.uint8,
                             encoding_format='png',
-                            doc='Main camera RGB observation.',
+                            doc='endoscope camera left RGB observation.',
                         ),
-                        'wrist_image': tfds.features.Image(
-                            shape=(64, 64, 3),
+                        'right_image': tfds.features.Image(
+                            shape=(960, 540, 3),
                             dtype=np.uint8,
                             encoding_format='png',
-                            doc='Wrist camera RGB observation.',
+                            doc='endoscope camera right RGB observation.',
                         ),
                         'state': tfds.features.Tensor(
                             shape=(10,),
