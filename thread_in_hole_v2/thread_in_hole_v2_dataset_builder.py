@@ -4,23 +4,20 @@ import glob
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
-import tensorflow_hub as hub
+import cv2
+import pandas as pd
+import os
 
-
-class ThreadInHoleV2(tfds.core.GeneratorBasedBuilder):
-    """DatasetBuilder for example dataset."""
+class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
+    """DatasetBuilder for thread-in-hole dataset."""
 
     VERSION = tfds.core.Version('1.0.0')
     RELEASE_NOTES = {
       '1.0.0': 'Initial release.',
     }
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._embed = hub.load("https://tfhub.dev/google/universal-sentence-encoder-large/5")
-
     def _info(self) -> tfds.core.DatasetInfo:
-        """Dataset metadata (homepage, citation,...)."""
+        """Dataset metadata."""
         return self.dataset_info_from_configs(
             features=tfds.features.FeaturesDict({
                 'steps': tfds.features.Dataset({
@@ -29,34 +26,29 @@ class ThreadInHoleV2(tfds.core.GeneratorBasedBuilder):
                             shape=(960, 540, 3),
                             dtype=np.uint8,
                             encoding_format='png',
-                            doc='endoscope camera left RGB observation.',
+                            doc='Left camera RGB observation.',
                         ),
                         'right_image': tfds.features.Image(
                             shape=(960, 540, 3),
                             dtype=np.uint8,
                             encoding_format='png',
-                            doc='endoscope camera right RGB observation.',
+                            doc='Right camera RGB observation.',
                         ),
-                        'state': tfds.features.Tensor(
-                            shape=(10,),
-                            dtype=np.float32,
-                            doc='Robot state, consists of [7x robot joint angles, '
-                                '2x gripper position, 1x door opening angle].',
-                        )
+                        'abs_pos_x': tf.float32,
+                        'abs_pos_y': tf.float32,
+                        'abs_pos_z': tf.float32,
+                        'abs_pos_x_t': tf.float32,
+                        'abs_pos_y_t': tf.float32,
+                        'abs_pos_z_t': tf.float32,
+                        'xquat': tf.float32,
+                        'yquat': tf.float32,
+                        'zquat': tf.float32,
+                        'wquat': tf.float32
                     }),
                     'action': tfds.features.Tensor(
-                        shape=(10,),
+                        shape=(3,),
                         dtype=np.float32,
-                        doc='Robot action, consists of [7x joint velocities, '
-                            '2x gripper velocities, 1x terminate episode].',
-                    ),
-                    'discount': tfds.features.Scalar(
-                        dtype=np.float32,
-                        doc='Discount if provided, default to 1.'
-                    ),
-                    'reward': tfds.features.Scalar(
-                        dtype=np.float32,
-                        doc='Reward if provided, 1 on final step for demos.'
+                        doc='Desired position, consists of [3x desired position].',
                     ),
                     'is_first': tfds.features.Scalar(
                         dtype=np.bool_,
@@ -65,19 +57,6 @@ class ThreadInHoleV2(tfds.core.GeneratorBasedBuilder):
                     'is_last': tfds.features.Scalar(
                         dtype=np.bool_,
                         doc='True on last step of the episode.'
-                    ),
-                    'is_terminal': tfds.features.Scalar(
-                        dtype=np.bool_,
-                        doc='True on last step of the episode if it is a terminal step, True for demos.'
-                    ),
-                    'language_instruction': tfds.features.Text(
-                        doc='Language Instruction.'
-                    ),
-                    'language_embedding': tfds.features.Tensor(
-                        shape=(512,),
-                        dtype=np.float32,
-                        doc='Kona language embedding. '
-                            'See https://tfhub.dev/google/universal-sentence-encoder-large/5'
                     ),
                 }),
                 'episode_metadata': tfds.features.FeaturesDict({
@@ -90,37 +69,40 @@ class ThreadInHoleV2(tfds.core.GeneratorBasedBuilder):
     def _split_generators(self, dl_manager: tfds.download.DownloadManager):
         """Define data splits."""
         return {
-            'train': self._generate_examples(path='data/train/episode_*.npy'),
-            'val': self._generate_examples(path='data/val/episode_*.npy'),
+            'train': self._generate_examples(path='/mnt/cluster/datasets/thread_in_hole/v2/*/episode.csv'),
         }
 
     def _generate_examples(self, path) -> Iterator[Tuple[str, Any]]:
         """Generator of examples for each split."""
 
         def _parse_example(episode_path):
-            # load raw data --> this should change for your dataset
-            data = np.load(episode_path, allow_pickle=True)     # this is a list of dicts in our case
+            # load raw data
+            data = pd.read_csv(episode_path)
+            
+            # Get the demo folder path
+            demo_folder = os.path.dirname(episode_path)
 
-            # assemble episode --> here we're assuming demos so we set reward to 1 at the end
+            # assemble episode
             episode = []
-            for i, step in enumerate(data):
-                # compute Kona language embedding
-                language_embedding = self._embed([step['language_instruction']])[0].numpy()
-
+            for i, row in data.iterrows():
                 episode.append({
                     'observation': {
-                        'image': step['image'],
-                        'wrist_image': step['wrist_image'],
-                        'state': step['state'],
+                        'left_image': cv2.imread(os.path.join(demo_folder, row['left_img'])),
+                        'right_image': cv2.imread(os.path.join(demo_folder, row['right_img'])),
+                        'abs_pos_x': row['abs_pos_x'],
+                        'abs_pos_y': row['abs_pos_y'],
+                        'abs_pos_z': row['abs_pos_z'],
+                        'abs_pos_x_t': row['abs_pos_x_t'],
+                        'abs_pos_y_t': row['abs_pos_y_t'],
+                        'abs_pos_z_t': row['abs_pos_z_t'],
+                        'xquat': row['xquat'],
+                        'yquat': row['yquat'],
+                        'zquat': row['zquat'],
+                        'wquat': row['wquat'],
                     },
-                    'action': step['action'],
-                    'discount': 1.0,
-                    'reward': float(i == (len(data) - 1)),
+                    'action': np.array([row['abs_dx_t'], row['abs_dy_t'], row['abs_dz_t']], dtype=np.float32),
                     'is_first': i == 0,
                     'is_last': i == (len(data) - 1),
-                    'is_terminal': i == (len(data) - 1),
-                    'language_instruction': step['language_instruction'],
-                    'language_embedding': language_embedding,
                 })
 
             # create output data sample
@@ -131,7 +113,6 @@ class ThreadInHoleV2(tfds.core.GeneratorBasedBuilder):
                 }
             }
 
-            # if you want to skip an example for whatever reason, simply return None
             return episode_path, sample
 
         # create list of all examples
@@ -147,4 +128,3 @@ class ThreadInHoleV2(tfds.core.GeneratorBasedBuilder):
         #         beam.Create(episode_paths)
         #         | beam.Map(_parse_example)
         # )
-
