@@ -78,14 +78,16 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
         def _parse_example(episode_path):
             # load raw data
             data = pd.read_csv(episode_path)
+            data = data[::6]
+            data[["actionx", "actiony", "actionz"]] = np.nan_to_num( np.array(data[["abs_pos_x_t", "abs_pos_y_t", "abs_pos_z_t"]].shift(-1)) - np.array(data[["abs_pos_x_t", "abs_pos_y_t", "abs_pos_z_t"]] ))
             
             # Get the demo folder path
             demo_folder = os.path.dirname(episode_path)
 
             # assemble episode
-            episode = []
+            data = []
             for i, row in data.iterrows():
-                episode.append({
+                data.append({
                     'observation': {
                         'left_image': cv2.imread(os.path.join(demo_folder, row['left_img'])),
                         'right_image': cv2.imread(os.path.join(demo_folder, row['right_img'])),
@@ -100,14 +102,14 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                         'zquat': row['zquat'],
                         'wquat': row['wquat'],
                     },
-                    'action': np.array([row['abs_dx_t'], row['abs_dy_t'], row['abs_dz_t']], dtype=np.float32),
+                    'action': np.array([row['actionx'], row['actiony'], row['actionz']], dtype=np.float32),
                     'is_first': i == 0,
                     'is_last': i == (len(data) - 1),
                 })
 
             # create output data sample
             sample = {
-                'steps': episode,
+                'steps': data,
                 'episode_metadata': {
                     'file_path': episode_path
                 }
@@ -128,3 +130,8 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
         #         beam.Create(episode_paths)
         #         | beam.Map(_parse_example)
         # )
+
+
+if __name__  == "__main__":
+    threadinholedataset = ThreadInHoleDataset()
+    print("done")
