@@ -1,119 +1,181 @@
 from typing import Iterator, Tuple, Any
-
 import glob
 import numpy as np
 import tensorflow as tf
 import tensorflow_datasets as tfds
-import cv2
+import tensorflow_hub as hub
 import pandas as pd
 import os
+from PIL import Image
 
 class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
-    """DatasetBuilder for thread-in-hole dataset."""
+    """DatasetBuilder for demonstration episodes stored as CSV files with custom columns."""
 
     VERSION = tfds.core.Version('1.0.0')
     RELEASE_NOTES = {
-      '1.0.0': 'Initial release.',
+        '1.0.0': 'Converted dataset from CSV files with downsampling and computed actions.',
     }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Load the Universal Sentence Encoder from TF Hub for language embeddings.
+        self._embed = hub.load("https://tfhub.dev/google/universal-sentence-encoder-large/5")
 
     def _info(self) -> tfds.core.DatasetInfo:
         """Dataset metadata."""
         return self.dataset_info_from_configs(
             features=tfds.features.FeaturesDict({
-                'steps': tfds.features.Dataset({
+                'steps': tfds.features.Sequence({
                     'observation': tfds.features.FeaturesDict({
-                        'left_image': tfds.features.Text(doc='Path to the Left camera RGB observation.',),
-                        'right_image': tfds.features.Text(doc='Path to the Right camera RGB observation.',),
-                        'abs_pos_x_t': tf.float32,
-                        'abs_pos_y_t': tf.float32,
-                        'abs_pos_z_t': tf.float32,
-                        'abs_dx_t': tf.float32,
-                        'abs_dy_t': tf.float32,
-                        'abs_dz_t': tf.float32,
+                        'left_img': tfds.features.Image(
+                            shape=(64, 64, 3),
+                            dtype=np.uint8,
+                            encoding_format='png',
+                            doc='Main camera RGB observation from left_img.',
+                        ),
+                        'right_img': tfds.features.Image(
+                            shape=(64, 64, 3),
+                            dtype=np.uint8,
+                            encoding_format='png',
+                            doc='Wrist camera RGB observation from right_img.',
+                        ),
+                        'state': tfds.features.Tensor(
+                            shape=(7,),
+                            dtype=np.float32,
+                            doc='Robot state: [abs_pos_x, abs_pos_y, abs_pos_z, xquat, yquat, zquat, wquat].',
+                        )
                     }),
                     'action': tfds.features.Tensor(
                         shape=(3,),
                         dtype=np.float32,
-                        doc='Desired position, consists of [3x desired position].',
+                        doc='Robot action computed as the difference between consecutive target positions: [actionx, actiony, actionz].',
+                    ),
+                    'discount': tfds.features.Scalar(
+                        dtype=np.float32,
+                        doc='Discount factor, default to 1.'
+                    ),
+                    'reward': tfds.features.Scalar(
+                        dtype=np.float32,
+                        doc='Reward, set to 1 on the final step for demos.'
                     ),
                     'is_first': tfds.features.Scalar(
                         dtype=np.bool_,
-                        doc='True on first step of the episode.'
+                        doc='True on the first step of the episode.'
                     ),
                     'is_last': tfds.features.Scalar(
                         dtype=np.bool_,
-                        doc='True on last step of the episode.'
+                        doc='True on the last step of the episode.'
+                    ),
+                    'is_terminal': tfds.features.Scalar(
+                        dtype=np.bool_,
+                        doc='True on the terminal step of the episode.'
+                    ),
+                    'language_instruction': tfds.features.Text(
+                        doc='(Empty) Language instruction.'
+                    ),
+                    'language_embedding': tfds.features.Tensor(
+                        shape=(512,),
+                        dtype=np.float32,
+                        doc='Language embedding computed from the instruction (empty in this demo).'
                     ),
                 }),
                 'episode_metadata': tfds.features.FeaturesDict({
                     'file_path': tfds.features.Text(
-                        doc='Path to the original data file.'
+                        doc='Path to the original CSV file.'
                     ),
                 }),
-            }))
+            })
+        )
 
     def _split_generators(self, dl_manager: tfds.download.DownloadManager):
         """Define data splits."""
+        # Look for CSV files in subfolders of /mnt/data/
+        csv_paths = glob.glob('/mnt/cluster/datasets/thread_in_hole/v2/*/episode.csv', recursive=True)
+        if not csv_paths:
+            # Fallback to the single uploaded file if no subfolder structure is found.
+            csv_paths = ["/mnt/cluster/datasets/thread_in_hole/v2/0/episode.csv"]
         return {
-            'train': self._generate_examples(path='/mnt/cluster/datasets/thread_in_hole/v2/*/episode.csv'),
+            'train': self._generate_examples(paths=csv_paths),
         }
 
-    def _generate_examples(self, path) -> Iterator[Tuple[str, Any]]:
+    def _generate_examples(self, paths) -> Iterator[Tuple[str, Any]]:
         """Generator of examples for each split."""
+        def load_image(image_path):
+            """Load an image from the given path and resize it to (64, 64)."""
+            with Image.open(image_path) as img:
+                img = img.convert("RGB")
+                img = img.resize((64, 64))
+                return np.array(img)
 
         def _parse_example(episode_path):
-            # load raw data
+            # Load raw CSV data.
             df = pd.read_csv(episode_path)
-            df = df[::6]
-            df[["actionx", "actiony", "actionz"]] = np.nan_to_num( np.array(df[["abs_pos_x_t", "abs_pos_y_t", "abs_pos_z_t"]].shift(-1)) - np.array(df[["abs_pos_x_t", "abs_pos_y_t", "abs_pos_z_t"]] ))
+            # Downsample: take every 6th row.
+            df = df[::6].reset_index(drop=True)
+            # Compute the action difference from consecutive rows for target positions.
+            df[["actionx", "actiony", "actionz"]] = np.nan_to_num(
+                np.array(df[["abs_pos_x_t", "abs_pos_y_t", "abs_pos_z_t"]].shift(-1)) -
+                np.array(df[["abs_pos_x_t", "abs_pos_y_t", "abs_pos_z_t"]])
+            )
+            episode = []
+            num_steps = len(df)
+            # Base directory to resolve relative paths.
+            base_dir = os.path.dirname(episode_path)
+            # Pre-compute language embedding for the empty string.
+            default_lang = ""
+            default_embedding = self._embed([default_lang]).numpy()[0]
             
-            df.dropna(inplace=True)
-
-            # Get the demo folder path  
-            demo_folder = os.path.dirname(episode_path)
-
-            # assemble episode
-            episode_steps = [] 
-            num_rows = len(df)  # Store length before overwriting df
-
             for i, row in df.iterrows():
-                episode_steps.append({
+                # Load images using file paths relative to the CSV's directory.
+                left_img_file = os.path.join(base_dir, row['left_img'])
+                right_img_file = os.path.join(base_dir, row['right_img'])
+                left_img_array = load_image(left_img_file)
+                right_img_array = load_image(right_img_file)
+
+                # Parse state: absolute position and orientation.
+                state = np.array([
+                    float(row['abs_pos_x']),
+                    float(row['abs_pos_y']),
+                    float(row['abs_pos_z']),
+                    float(row['xquat']),
+                    float(row['yquat']),
+                    float(row['zquat']),
+                    float(row['wquat'])
+                ], dtype=np.float32)
+
+                # Use computed actionx, actiony, actionz as the action.
+                action = np.array([
+                    float(row['actionx']),
+                    float(row['actiony']),
+                    float(row['actionz'])
+                ], dtype=np.float32)
+
+                step = {
                     'observation': {
-                        'left_image': os.path.join(demo_folder,row['left_img']),  # Store path to the image
-                        'right_image': os.path.join(demo_folder,row['right_img']),  # Store path to the image
-                        
-                        'abs_pos_x_t': row['abs_pos_x_t'],
-                        'abs_pos_y_t': row['abs_pos_y_t'],
-                        'abs_pos_z_t': row['abs_pos_z_t'],
-                        'abs_dx_t': row['abs_dx_t'],
-                        'abs_dy_t': row['abs_dy_t'],
-                        'abs_dz_t': row['abs_dz_t']
+                        'left_img': left_img_array,
+                        'right_img': right_img_array,
+                        'state': state,
                     },
-                    'action': np.array([row['actionx'], row['actiony'], row['actionz']], dtype=np.float32),
+                    'action': action,
+                    'discount': 1.0,
+                    # Reward: 1 on the final step, 0 otherwise.
+                    'reward': float(i == (num_steps - 1)),
                     'is_first': i == 0,
-                    'is_last': i == (num_rows - 1),
-                })
+                    'is_last': i == (num_steps - 1),
+                    'is_terminal': i == (num_steps - 1),
+                    # No language instruction provided.
+                    'language_instruction': default_lang,
+                    'language_embedding': default_embedding,
+                }
+                episode.append(step)
 
-            # create output data sample
             sample = {
-                'steps': episode_steps,
-                'episode_metadata': {'file_path': episode_path}
+                'steps': episode,
+                'episode_metadata': {
+                    'file_path': episode_path
+                }
             }
-
             return episode_path, sample
 
-        # create list of all examples
-        episode_paths = glob.glob(path)
-
-        # for smallish datasets, use single-thread parsing
-        for sample in episode_paths:
-            yield _parse_example(sample)
-
-        # for large datasets use beam to parallelize data parsing (this will have initialization overhead)
-        # beam = tfds.core.lazy_imports.apache_beam
-        # return (
-        #         beam.Create(episode_paths)
-        #         | beam.Map(_parse_example)
-        # )
-
-
+        for episode_path in paths:
+            yield _parse_example(episode_path)

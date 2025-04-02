@@ -4,5 +4,5 @@ import tensorflow_datasets as tfds
 dataset, info = tfds.load('thread_in_hole_dataset', with_info=True)
 
 # Check the first sample in the 'train' split
-for sample in dataset['train'].take(2):
+for sample in dataset['train'].take(20):
     print(sample)
