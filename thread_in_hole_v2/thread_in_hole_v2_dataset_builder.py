@@ -25,24 +25,25 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
         """Dataset metadata."""
         return self.dataset_info_from_configs(
             features=tfds.features.FeaturesDict({
-                'steps': tfds.features.Sequence({
+                'steps': tfds.features.Dataset({
                     'observation': tfds.features.FeaturesDict({
                         'left_img': tfds.features.Image(
-                            shape=(64, 64, 3),
+                            shape=(256, 256, 3),
                             dtype=np.uint8,
                             encoding_format='png',
-                            doc='Main camera RGB observation from left_img.',
+                            doc='RGB observation from left_img.',
                         ),
                         'right_img': tfds.features.Image(
-                            shape=(64, 64, 3),
+                            shape=(128, 128, 3),
                             dtype=np.uint8,
                             encoding_format='png',
-                            doc='Wrist camera RGB observation from right_img.',
+                            doc='RGB observation from right_img.',
                         ),
+                        # 'state' was renamed as 'proprio' for Octo model
                         'state': tfds.features.Tensor(
                             shape=(7,),
                             dtype=np.float32,
-                            doc='Robot state: [abs_pos_x, abs_pos_y, abs_pos_z, xquat, yquat, zquat, wquat].',
+                            doc='Robot state: [abs_pos_x_t, abs_pos_y_t, abs_pos_z_t, xquat, yquat, zquat, wquat].', 
                         )
                     }),
                     'action': tfds.features.Tensor(
@@ -100,11 +101,18 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
 
     def _generate_examples(self, paths) -> Iterator[Tuple[str, Any]]:
         """Generator of examples for each split."""
-        def load_image(image_path):
+        def load_left_image(image_path):
             """Load an image from the given path and resize it to (64, 64)."""
             with Image.open(image_path) as img:
                 img = img.convert("RGB")
-                img = img.resize((64, 64))
+                img = img.resize((256, 256))
+                return np.array(img)
+            
+        def load_right_image(image_path):
+            """Load an image from the given path and resize it to (64, 64)."""
+            with Image.open(image_path) as img:
+                img = img.convert("RGB")
+                img = img.resize((128, 128))
                 return np.array(img)
 
         def _parse_example(episode_path):
@@ -129,14 +137,14 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                 # Load images using file paths relative to the CSV's directory.
                 left_img_file = os.path.join(base_dir, row['left_img'])
                 right_img_file = os.path.join(base_dir, row['right_img'])
-                left_img_array = load_image(left_img_file)
-                right_img_array = load_image(right_img_file)
+                left_img_array = load_left_image(left_img_file)
+                right_img_array = load_right_image(right_img_file)
 
                 # Parse state: absolute position and orientation.
                 state = np.array([
-                    float(row['abs_pos_x']),
-                    float(row['abs_pos_y']),
-                    float(row['abs_pos_z']),
+                    float(row['abs_pos_x_t']),
+                    float(row['abs_pos_y_t']),
+                    float(row['abs_pos_z_t']),
                     float(row['xquat']),
                     float(row['yquat']),
                     float(row['zquat']),
