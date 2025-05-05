@@ -77,7 +77,7 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                     'language_embedding': tfds.features.Tensor(
                         shape=(512,),
                         dtype=np.float32,
-                        doc='Language embedding computed from the instruction (empty in this demo).'
+                        doc='Language embedding computed from the instruction.'
                     ),
                 }),
                 'episode_metadata': tfds.features.FeaturesDict({
