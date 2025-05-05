@@ -172,7 +172,7 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                     'is_first': i == 0,
                     'is_last': i == (num_steps - 1),
                     'is_terminal': i == (num_steps - 1),
-                    # No language instruction provided.
+                    
                     'language_instruction': language_instruction,
                     'language_embedding': language_embedding,
                 }
