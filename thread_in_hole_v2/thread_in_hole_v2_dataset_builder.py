@@ -129,9 +129,10 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             num_steps = len(df)
             # Base directory to resolve relative paths.
             base_dir = os.path.dirname(episode_path)
-            # Pre-compute language embedding for the empty string.
-            default_lang = ""
-            default_embedding = self._embed([default_lang]).numpy()[0]
+            # Language instruction for the task to be performed
+            language_instruction = "Insert the thread into the hole in blue hole base"
+            language_embedding = self._embed([language_instruction]).numpy()[0]
+
             
             for i, row in df.iterrows():
                 # Load images using file paths relative to the CSV's directory.
@@ -172,8 +173,8 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                     'is_last': i == (num_steps - 1),
                     'is_terminal': i == (num_steps - 1),
                     # No language instruction provided.
-                    'language_instruction': default_lang,
-                    'language_embedding': default_embedding,
+                    'language_instruction': language_instruction,
+                    'language_embedding': language_embedding,
                 }
                 episode.append(step)
 
