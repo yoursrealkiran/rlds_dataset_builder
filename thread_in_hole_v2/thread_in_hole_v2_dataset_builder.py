@@ -67,9 +67,9 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             df = pd.read_csv(episode_path)
             df = df[::6].reset_index(drop=True)
 
-            # Normalize positions to initial position
-            initial_pos = df.loc[0, ['abs_pos_x_t', 'abs_pos_y_t', 'abs_pos_z_t']].values.astype(np.float32)
-            pos_cols = ['abs_pos_x_t', 'abs_pos_y_t', 'abs_pos_z_t']
+            # Normalize positions to initial position (Non-transformed position values are used here)
+            initial_pos = df.loc[0, ['abs_pos_x', 'abs_pos_y', 'abs_pos_z']].values.astype(np.float32)
+            pos_cols = ['abs_pos_x', 'abs_pos_y', 'abs_pos_z']
             #print(df[pos_cols].head())
             df[pos_cols] = df[pos_cols].astype(np.float32).values - initial_pos
 
