@@ -13,7 +13,7 @@ from PIL import Image
 class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
     VERSION = tfds.core.Version('1.0.0')
     RELEASE_NOTES = {
-        '1.0.0': 'Converted dataset from CSV files with downsampling and computed actions.',
+        '1.0.0': 'Converted dataset from CSV files with normalized positions and next-step actions.',
     }
 
     def __init__(self, *args, **kwargs):
@@ -25,40 +25,23 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             features=tfds.features.FeaturesDict({
                 'steps': tfds.features.Dataset({
                     'observation': tfds.features.FeaturesDict({
-                        'left_img': tfds.features.Image(
-                            shape=(256, 256, 3),
-                            dtype=np.uint8,
-                            encoding_format='png',
-                            doc='RGB observation from left_img.',
-                        ),
-                        'right_img': tfds.features.Image(
-                            shape=(128, 128, 3),
-                            dtype=np.uint8,
-                            encoding_format='png',
-                            doc='RGB observation from right_img.',
-                        ),
-                        'state': tfds.features.Tensor(
-                            shape=(8,),
-                            dtype=np.float32,
-                            doc='Robot state: [x, y, z, xquat, yquat, zquat, wquat, gripper_closed].', 
-                        )
+                        'left_img': tfds.features.Image(shape=(270, 480, 3), 
+                                                        dtype=np.uint8, 
+                                                        encoding_format='png'),
+                        'right_img': tfds.features.Image(shape=(270, 480, 3), 
+                                                         dtype=np.uint8, 
+                                                         encoding_format='png'),
+                        'state': tfds.features.Tensor(shape=(8,), 
+                                                      dtype=np.float32),
                     }),
-                    'action': tfds.features.Tensor(
-                        shape=(7,),
-                        dtype=np.float32,
-                        doc='Action: [dx, dy, dz, droll, dpitch, dyaw, gripper_closed].',
-                    ),
-                    'discount': tfds.features.Scalar(dtype=np.float32, doc='Discount factor'),
-                    'reward': tfds.features.Scalar(dtype=np.float32, doc='Reward'),
-                    'is_first': tfds.features.Scalar(dtype=np.bool_, doc='Is first step'),
-                    'is_last': tfds.features.Scalar(dtype=np.bool_, doc='Is last step'),
-                    'is_terminal': tfds.features.Scalar(dtype=np.bool_, doc='Is terminal'),
+                    'action': tfds.features.Tensor(shape=(7,), dtype=np.float32),
+                    'discount': tfds.features.Scalar(dtype=np.float32),
+                    'reward': tfds.features.Scalar(dtype=np.float32),
+                    'is_first': tfds.features.Scalar(dtype=np.bool_),
+                    'is_last': tfds.features.Scalar(dtype=np.bool_),
+                    'is_terminal': tfds.features.Scalar(dtype=np.bool_),
                     'language_instruction': tfds.features.Text(),
-                    'language_embedding': tfds.features.Tensor(
-                        shape=(512,),
-                        dtype=np.float32,
-                        doc='USE embedding'
-                    ),
+                    'language_embedding': tfds.features.Tensor(shape=(512,), dtype=np.float32),
                 }),
                 'episode_metadata': tfds.features.FeaturesDict({
                     'file_path': tfds.features.Text(),
@@ -75,25 +58,30 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
         }
 
     def _generate_examples(self, paths) -> Iterator[Tuple[str, Any]]:
-        def load_left_image(image_path):
+        def load_image(image_path):
             with Image.open(image_path) as img:
-                img = img.convert("RGB")
-                img = img.resize((256, 256))
-                return np.array(img)
-
-        def load_right_image(image_path):
-            with Image.open(image_path) as img:
-                img = img.convert("RGB")
-                img = img.resize((128, 128))
+                img = img.convert("RGB").resize((480, 270))
                 return np.array(img)
 
         def _parse_example(episode_path):
             df = pd.read_csv(episode_path)
             df = df[::6].reset_index(drop=True)
-            df[["actionx", "actiony", "actionz"]] = np.nan_to_num(
-                np.array(df[["abs_pos_x_t", "abs_pos_y_t", "abs_pos_z_t"]].shift(-1)) -
-                np.array(df[["abs_pos_x_t", "abs_pos_y_t", "abs_pos_z_t"]])
-            )
+
+            # Normalize positions to initial position
+            initial_pos = df.loc[0, ['abs_pos_x_t', 'abs_pos_y_t', 'abs_pos_z_t']].values.astype(np.float32)
+            pos_cols = ['abs_pos_x_t', 'abs_pos_y_t', 'abs_pos_z_t']
+            #print(df[pos_cols].head())
+            df[pos_cols] = df[pos_cols].astype(np.float32).values - initial_pos
+
+            #print(initial_pos)
+            #print(df[pos_cols].head())
+            #exit(0)
+
+            # Assigning the next position (relative to the initial position) directly as the action.
+            df[['actionx', 'actiony', 'actionz']] = df[pos_cols].shift(-1) 
+            # The .shift(-1) makes the last row have NaN, fillna(0.0) replaces NaN with 0.0.
+            df[['actionx', 'actiony', 'actionz']] = df[['actionx', 'actiony', 'actionz']].fillna(0.0) 
+
             episode = []
             num_steps = len(df)
             base_dir = os.path.dirname(episode_path)
@@ -101,36 +89,29 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             language_embedding = self._embed([language_instruction]).numpy()[0]
 
             for i, row in df.iterrows():
-                left_img_file = os.path.join(base_dir, row['left_img'])
-                right_img_file = os.path.join(base_dir, row['right_img'])
-                left_img_array = load_left_image(left_img_file)
-                right_img_array = load_right_image(right_img_file)
+                left_img = load_image(os.path.join(base_dir, row['left_img']))
+                right_img = load_image(os.path.join(base_dir, row['right_img']))
 
-                # State with gripper closed
                 state = np.array([
-                    float(row['abs_pos_x_t']),
-                    float(row['abs_pos_y_t']),
-                    float(row['abs_pos_z_t']),
-                    float(row['xquat']),
-                    float(row['yquat']),
-                    float(row['zquat']),
-                    float(row['wquat']),
+                    row['abs_pos_x_t'],
+                    row['abs_pos_y_t'],
+                    row['abs_pos_z_t'],
+                    0.0, 0.0, 0.0, 0.0,   # not using quat tranformation now, so it has been set to '0' 
                     1.0  # gripper closed
                 ], dtype=np.float32)
 
-                # Action with rotation_delta zero + gripper closed
                 action = np.array([
-                    float(row['actionx']),
-                    float(row['actiony']),
-                    float(row['actionz']),
-                    0.0, 0.0, 0.0,  # droll, dpitch, dyaw (rotation_delta)
+                    row['actionx'],
+                    row['actiony'],
+                    row['actionz'],
+                    0.0, 0.0, 0.0,  # no rotation delta, so it has been set to '0'
                     1.0             # gripper closed
                 ], dtype=np.float32)
 
                 step = {
                     'observation': {
-                        'left_img': left_img_array,
-                        'right_img': right_img_array,
+                        'left_img': left_img,
+                        'right_img': right_img,
                         'state': state,
                     },
                     'action': action,
@@ -144,13 +125,12 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                 }
                 episode.append(step)
 
-            sample = {
+            yield episode_path, {
                 'steps': episode,
                 'episode_metadata': {
                     'file_path': episode_path
                 }
             }
-            return episode_path, sample
 
         for episode_path in paths:
-            yield _parse_example(episode_path)
+            yield from _parse_example(episode_path)
