@@ -8,8 +8,6 @@ import pandas as pd
 import os
 from PIL import Image
 
-
-
 class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
     VERSION = tfds.core.Version('1.0.0')
     RELEASE_NOTES = {
@@ -18,6 +16,7 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        # Load Universal Sentence Encoder for embedding language instructions
         self._embed = hub.load("https://tfhub.dev/google/universal-sentence-encoder-large/5")
 
     def _info(self) -> tfds.core.DatasetInfo:
@@ -50,9 +49,10 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-        csv_paths = glob.glob('/mnt/cluster/datasets/thread_in_hole/v2/*/episode.csv', recursive=True)
+        # Collect all episode.csv paths in the dataset
+        csv_paths = glob.glob('/mnt/cluster/datasets/thread_in_hole/v3/*/episode.csv', recursive=True)
         if not csv_paths:
-            csv_paths = ["/mnt/cluster/datasets/thread_in_hole/v2/0/episode.csv"]
+            csv_paths = ["/mnt/cluster/datasets/thread_in_hole/v3/0/episode.csv"]
         return {
             'train': self._generate_examples(paths=csv_paths),
         }
@@ -63,13 +63,39 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                 img = img.convert("RGB").resize((480, 270))
                 return np.array(img)
 
-        def _parse_example(episode_path):
+        # Sort paths to ensure consistent indexing for language instruction mapping
+        paths = sorted(paths)
+
+        #  Helper function to assign language instruction based on episode index
+        def get_instruction(index: int) -> str:
+            if index in [0, 1]:
+                return "Insert the white thread straight into the square cavity of the green cube-shaped block"
+            elif 2 <= index <= 14:
+                return "Insert the white thread into the hole of the dark blue cylinder"
+            elif 15 <= index <= 30:
+                return "Insert the white thread into the hole of the green cylinder"
+            elif 31 <= index <= 44:
+                return "Insert the white thread straight into the square cavity of the green cube-shaped block"
+            elif 45 <= index <= 59:
+                return "Insert the white thread into the hole of the dark blue cylinder"
+            elif 60 <= index <= 74:
+                return "Insert the white thread into the hole of the green cylinder"
+            elif 75 <= index <= 89:
+                return "Insert the white thread straight into the square cavity of the green cube-shaped block"
+            elif 90 <= index <= 104:
+                return "Insert the white thread into the hole of the dark blue cylinder"
+            elif 105 <= index <= 119:
+                return "Insert the white thread into the hole of the green cylinder"
+            else:
+                return "Insert the white thread straight into the square cavity of the green cube-shaped block"
+
+        for index, episode_path in enumerate(paths):
             df = pd.read_csv(episode_path)
-            df = df[::6].reset_index(drop=True)
+            # df = df[::6].reset_index(drop=True) # Comment out if Downsampling is to be included.
 
             # Normalize positions to initial position (Non-transformed position values are used here)
-            initial_pos = df.loc[0, ['abs_pos_x', 'abs_pos_y', 'abs_pos_z']].values.astype(np.float32)
-            pos_cols = ['abs_pos_x', 'abs_pos_y', 'abs_pos_z']
+            initial_pos = df.loc[0, ['robotTipPositionX', 'robotTipPositionY', 'robotTipPositionZ']].values.astype(np.float32)
+            pos_cols = ['robotTipPositionX', 'robotTipPositionY', 'robotTipPositionZ']
             #print(df[pos_cols].head())
             df[pos_cols] = df[pos_cols].astype(np.float32).values - initial_pos
 
@@ -85,18 +111,20 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             episode = []
             num_steps = len(df)
             base_dir = os.path.dirname(episode_path)
-            language_instruction = "Insert the thread into the hole in blue hole base"
+
+            # 🆕 Assign instruction and compute sentence embedding
+            language_instruction = get_instruction(index)
             language_embedding = self._embed([language_instruction]).numpy()[0]
 
             for i, row in df.iterrows():
-                left_img = load_image(os.path.join(base_dir, row['left_img']))
-                right_img = load_image(os.path.join(base_dir, row['right_img']))
+                left_img = load_image(os.path.join(base_dir, row['frameLeftPath']))
+                right_img = load_image(os.path.join(base_dir, row['frameRightPath']))
 
                 state = np.array([
-                    row['abs_pos_x_t'],
-                    row['abs_pos_y_t'],
-                    row['abs_pos_z_t'],
-                    0.0, 0.0, 0.0, 0.0,   # not using quat tranformation now, so it has been set to '0' 
+                    row['robotTipPositionX'],
+                    row['robotTipPositionY'],
+                    row['robotTipPositionZ'],
+                    0.0, 0.0, 0.0, 0.0,   # not using quat transformation now, so it has been set to '0' 
                     1.0  # gripper closed
                 ], dtype=np.float32)
 
@@ -131,6 +159,3 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                     'file_path': episode_path
                 }
             }
-
-        for episode_path in paths:
-            yield from _parse_example(episode_path)
