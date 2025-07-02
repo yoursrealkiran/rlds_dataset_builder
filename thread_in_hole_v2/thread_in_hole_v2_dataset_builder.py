@@ -8,6 +8,9 @@ import pandas as pd
 import os
 from PIL import Image
 
+import random
+
+
 class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
     VERSION = tfds.core.Version('1.0.0')
     RELEASE_NOTES = {
@@ -62,32 +65,31 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             with Image.open(image_path) as img:
                 img = img.convert("RGB").resize((480, 270))
                 return np.array(img)
+        
+        # Load instruction pools from files
+        with open("/mnt/cluster/workspaces/students/muthuraki/rlds_dataset_builder/language_instructions/green_cube.txt", "r") as f:
+            green_cube_instructions = [line.strip() for line in f if line.strip()]
+
+        with open("/mnt/cluster/workspaces/students/muthuraki/rlds_dataset_builder/language_instructions/dark_blue_cylinder.txt", "r") as f:
+            dark_blue_cylinder_instructions = [line.strip() for line in f if line.strip()]
+
+        with open("/mnt/cluster/workspaces/students/muthuraki/rlds_dataset_builder/language_instructions/green_cylinder.txt", "r") as f:
+            green_cylinder_instructions = [line.strip() for line in f if line.strip()]
 
         # Sort paths to ensure consistent indexing for language instruction mapping
         paths = sorted(paths)
 
         #  Helper function to assign language instruction based on episode index
         def get_instruction(index: int) -> str:
-            if index in [0, 1]:
-                return "Insert the white thread straight into the square cavity of the green cube-shaped block"
-            elif 2 <= index <= 14:
-                return "Insert the white thread into the hole of the dark blue cylinder"
-            elif 15 <= index <= 30:
-                return "Insert the white thread into the hole of the green cylinder"
-            elif 31 <= index <= 44:
-                return "Insert the white thread straight into the square cavity of the green cube-shaped block"
-            elif 45 <= index <= 59:
-                return "Insert the white thread into the hole of the dark blue cylinder"
-            elif 60 <= index <= 74:
-                return "Insert the white thread into the hole of the green cylinder"
-            elif 75 <= index <= 89:
-                return "Insert the white thread straight into the square cavity of the green cube-shaped block"
-            elif 90 <= index <= 104:
-                return "Insert the white thread into the hole of the dark blue cylinder"
-            elif 105 <= index <= 119:
-                return "Insert the white thread into the hole of the green cylinder"
+            if index in [0, 1] or 31 <= index <= 44 or 75 <= index <= 89 or index > 119:
+                return random.choice(green_cube_instructions)
+            elif 2 <= index <= 14 or 45 <= index <= 59 or 90 <= index <= 104:
+                return random.choice(dark_blue_cylinder_instructions)
+            elif 15 <= index <= 30 or 60 <= index <= 74 or 105 <= index <= 119:
+                return random.choice(green_cylinder_instructions)
             else:
-                return "Insert the white thread straight into the square cavity of the green cube-shaped block"
+                return "Insert the thread into the hole"
+
 
         for index, episode_path in enumerate(paths):
             df = pd.read_csv(episode_path)
@@ -112,7 +114,7 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             num_steps = len(df)
             base_dir = os.path.dirname(episode_path)
 
-            # 🆕 Assign instruction and compute sentence embedding
+            # Assign instruction and compute sentence embedding
             language_instruction = get_instruction(index)
             language_embedding = self._embed([language_instruction]).numpy()[0]
 
