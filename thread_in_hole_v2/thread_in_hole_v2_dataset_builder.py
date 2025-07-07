@@ -93,7 +93,7 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
 
         for index, episode_path in enumerate(paths):
             df = pd.read_csv(episode_path)
-            # df = df[::6].reset_index(drop=True) # Comment out if Downsampling is to be included.
+            df = df[::2].reset_index(drop=True) # Downsampling is to be included.
 
             # Normalize positions to initial position (Non-transformed position values are used here)
             initial_pos = df.loc[0, ['robotTipPositionX', 'robotTipPositionY', 'robotTipPositionZ']].values.astype(np.float32)
