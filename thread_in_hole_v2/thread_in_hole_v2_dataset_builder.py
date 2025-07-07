@@ -105,10 +105,13 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             #print(df[pos_cols].head())
             #exit(0)
 
-            # Assigning the next position (relative to the initial position) directly as the action.
-            df[['actionx', 'actiony', 'actionz']] = df[pos_cols].shift(-1) 
-            # The .shift(-1) makes the last row have NaN, fillna(0.0) replaces NaN with 0.0.
-            df[['actionx', 'actiony', 'actionz']] = df[['actionx', 'actiony', 'actionz']].fillna(0.0) 
+            # Compute action as delta to next position
+            next_pos = df[pos_cols].shift(-1)
+            curr_pos = df[pos_cols]
+            action_delta = next_pos - curr_pos
+            action_delta = action_delta.fillna(0.0)  # Last row becomes 0 delta
+            df[['actionx', 'actiony', 'actionz']] = action_delta
+
 
             episode = []
             num_steps = len(df)
