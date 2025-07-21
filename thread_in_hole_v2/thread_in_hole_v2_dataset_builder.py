@@ -53,9 +53,9 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
 
     def _split_generators(self, dl_manager: tfds.download.DownloadManager):
         # Collect all episode.csv paths in the dataset
-        csv_paths = glob.glob('/mnt/cluster/datasets/thread_in_hole/v3/*/episode.csv', recursive=True)
+        csv_paths = glob.glob('/mnt/cluster/datasets/thread_in_hole/v4/*/episode.csv', recursive=True)
         if not csv_paths:
-            csv_paths = ["/mnt/cluster/datasets/thread_in_hole/v3/0/episode.csv"]
+            csv_paths = ["/mnt/cluster/datasets/thread_in_hole/v4/0/episode.csv"]
         return {
             'train': self._generate_examples(paths=csv_paths),
         }
@@ -81,23 +81,25 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
 
         #  Helper function to assign language instruction based on episode index
         def get_instruction(index: int) -> str:
-            if index in [0, 1] or 31 <= index <= 44 or 75 <= index <= 89 or index > 119:
-                return random.choice(green_cube_instructions)
-            elif 2 <= index <= 14 or 45 <= index <= 59 or 90 <= index <= 104:
-                return random.choice(dark_blue_cylinder_instructions)
-            elif 15 <= index <= 30 or 60 <= index <= 74 or 105 <= index <= 119:
+            # index starts from 0, so adjust ranges by -1
+            if 0 <= index <= 19:  # 1-20
                 return random.choice(green_cylinder_instructions)
+            elif 20 <= index <= 39:  # 21-40
+                return random.choice(dark_blue_cylinder_instructions)
+            elif 40 <= index <= 59:  # 41-60
+                return random.choice(green_cube_instructions)
             else:
                 return "Insert the thread into the hole"
 
 
+
         for index, episode_path in enumerate(paths):
             df = pd.read_csv(episode_path)
-            df = df[::2].reset_index(drop=True) # Downsampling is to be included.
+            #df = df[::2].reset_index(drop=True) # Downsampling is to be included.
 
             # Normalize positions to initial position (Non-transformed position values are used here)
-            initial_pos = df.loc[0, ['robotTipPositionX', 'robotTipPositionY', 'robotTipPositionZ']].values.astype(np.float32)
-            pos_cols = ['robotTipPositionX', 'robotTipPositionY', 'robotTipPositionZ']
+            initial_pos = df.loc[0, ['relative_tip_position_x', 'relative_tip_position_y', 'relative_tip_position_z']].values.astype(np.float32)
+            pos_cols = ['relative_tip_position_x', 'relative_tip_position_y', 'relative_tip_position_z']
             #print(df[pos_cols].head())
             df[pos_cols] = df[pos_cols].astype(np.float32).values - initial_pos
 
@@ -122,23 +124,23 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             language_embedding = self._embed([language_instruction]).numpy()[0]
 
             for i, row in df.iterrows():
-                left_img = load_image(os.path.join(base_dir, row['frameLeftPath']))
-                right_img = load_image(os.path.join(base_dir, row['frameRightPath']))
+                left_img = load_image(os.path.join(base_dir, row['frameLeftRectifiedPath']))
+                right_img = load_image(os.path.join(base_dir, row['frameRightRectifiedPath']))
 
                 state = np.array([
-                    row['robotTipPositionX'],
-                    row['robotTipPositionY'],
-                    row['robotTipPositionZ'],
+                    row['relative_tip_position_x'],
+                    row['relative_tip_position_y'],
+                    row['relative_tip_position_z'],
                     0.0, 0.0, 0.0, 0.0,   # not using quat transformation now, so it has been set to '0' 
-                    1.0  # gripper closed
+                    0.0                   # not using gripper 
                 ], dtype=np.float32)
 
                 action = np.array([
                     row['actionx'],
                     row['actiony'],
                     row['actionz'],
-                    0.0, 0.0, 0.0,  # no rotation delta, so it has been set to '0'
-                    1.0             # gripper closed
+                    0.0, 0.0, 0.0,        # no rotation delta, so it has been set to '0'
+                    0.0                   # not using gripper
                 ], dtype=np.float32)
 
                 step = {
