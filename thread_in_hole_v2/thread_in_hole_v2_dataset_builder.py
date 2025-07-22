@@ -127,16 +127,16 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                 left_img = load_image(os.path.join(base_dir, row['frameLeftRectifiedPath']))
                 right_img = load_image(os.path.join(base_dir, row['frameRightRectifiedPath']))
 
-                state = np.array([
-                    row['relative_tip_position_x'],
-                    row['relative_tip_position_y'],
-                    row['relative_tip_position_z'],
+                state = np.array([ # all proprio data has been set to 0 in observation, relative_tip_positions are not used
+                    0.0, 
+                    0.0,
+                    0.0,
                     0.0, 0.0, 0.0, 0.0,   # not using quat transformation now, so it has been set to '0' 
                     0.0                   # not using gripper 
                 ], dtype=np.float32)
 
                 action = np.array([
-                    row['actionx'],
+                    row['actionx'],         
                     row['actiony'],
                     row['actionz'],
                     0.0, 0.0, 0.0,        # no rotation delta, so it has been set to '0'
