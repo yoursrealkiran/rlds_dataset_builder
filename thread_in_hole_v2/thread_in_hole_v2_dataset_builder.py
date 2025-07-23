@@ -6,7 +6,7 @@ import tensorflow_datasets as tfds
 import tensorflow_hub as hub
 import pandas as pd
 import os
-from PIL import Image
+from PIL import Image, ImageOps
 
 import random
 
@@ -27,10 +27,10 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             features=tfds.features.FeaturesDict({
                 'steps': tfds.features.Dataset({
                     'observation': tfds.features.FeaturesDict({
-                        'left_img': tfds.features.Image(shape=(270, 480, 3), 
+                        'left_img': tfds.features.Image(shape=(256, 256, 3), 
                                                         dtype=np.uint8, 
                                                         encoding_format='png'),
-                        'right_img': tfds.features.Image(shape=(270, 480, 3), 
+                        'right_img': tfds.features.Image(shape=(128, 128, 3), 
                                                          dtype=np.uint8, 
                                                          encoding_format='png'),
                         'state': tfds.features.Tensor(shape=(8,), 
@@ -61,11 +61,13 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
         }
 
     def _generate_examples(self, paths) -> Iterator[Tuple[str, Any]]:
-        def load_image(image_path):
+        def load_image(image_path, target_size=(256, 256)):
             with Image.open(image_path) as img:
-                img = img.convert("RGB").resize((480, 270))
+                img = img.convert("RGB")
+                # Scale and pad to match the target size
+                img = ImageOps.pad(img, target_size, method=Image.Resampling.LANCZOS, color=(0, 0, 0))
                 return np.array(img)
-        
+            
         # Load instruction pools from files
         with open("/mnt/cluster/workspaces/students/muthuraki/rlds_dataset_builder/language_instructions/green_cube.txt", "r") as f:
             green_cube_instructions = [line.strip() for line in f if line.strip()]
@@ -122,8 +124,8 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             language_embedding = self._embed([language_instruction]).numpy()[0]
 
             for i, row in df.iterrows():
-                left_img = load_image(os.path.join(base_dir, row['frameLeftRectifiedPath']))
-                right_img = load_image(os.path.join(base_dir, row['frameRightRectifiedPath']))
+                left_img = load_image(os.path.join(base_dir, row['frameLeftRectifiedPath']), target_size=(256, 256))
+                right_img = load_image(os.path.join(base_dir, row['frameRightRectifiedPath']), target_size=(128, 128))
 
                 state = np.array([
                     row['relative_tip_position_x'],
