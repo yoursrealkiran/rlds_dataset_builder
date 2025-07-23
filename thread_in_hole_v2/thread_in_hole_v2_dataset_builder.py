@@ -109,11 +109,12 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             #print(df[pos_cols].head())
             #exit(0)
 
-            # Assigning the next position (relative to the initial position) directly as the action.
-            df[['actionx', 'actiony', 'actionz']] = df[pos_cols].shift(-1) 
-            # The .shift(-1) makes the last row have NaN, fillna(0.0) replaces NaN with 0.0.
-            df[['actionx', 'actiony', 'actionz']] = df[['actionx', 'actiony', 'actionz']].fillna(0.0) 
-
+            # Compute action as delta to next position
+            next_pos = df[pos_cols].shift(-1)
+            curr_pos = df[pos_cols]
+            action_delta = next_pos - curr_pos
+            action_delta = action_delta.fillna(0.0)  # Last row becomes 0 delta
+            df[['actionx', 'actiony', 'actionz']] = action_delta 
 
             episode = []
             num_steps = len(df)
@@ -127,10 +128,10 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                 left_img = load_image(os.path.join(base_dir, row['frameLeftRectifiedPath']), target_size=(256, 256))
                 right_img = load_image(os.path.join(base_dir, row['frameRightRectifiedPath']), target_size=(128, 128))
 
-                state = np.array([
-                    row['relative_tip_position_x'],
-                    row['relative_tip_position_y'],
-                    row['relative_tip_position_z'],
+                state = np.array([  # all proprio data has been set to 0 in observation, relative_tip_positions are not used
+                    0.0,
+                    0.0,
+                    0.0,
                     0.0, 0.0, 0.0, 0.0,   # not using quat transformation now, so it has been set to '0' 
                     0.0                   # not using gripper 
                 ], dtype=np.float32)
