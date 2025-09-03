@@ -24,20 +24,23 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
 
         self.num_episodes = len(csv_paths)
 
+        # Define three fixed instructions for three episode groups
+        # self.fixed_instructions = [
+        #     "Insert the white thread into the round hole of the green cylinder",
+        #     "Insert the white thread into the round hole of the dark blue cylinder",
+        #     "Insert the white thread into the square hole of green cube",
+        # ]
+
         if episodes_config is not None:
             if len(episodes_config) != self.num_episodes:
                 raise ValueError(f"episodes_config must have {self.num_episodes} items, got {len(episodes_config)}")
             self.episodes_config = episodes_config
         else:
             self.episodes_config = []
-            # Load language instruction pools once
-            green_cube = self._load_instructions('/mnt/cluster/workspaces/students/muthuraki/rlds_dataset_builder/language_instructions/green_cube.txt')
-            dark_blue_cyl = self._load_instructions('/mnt/cluster/workspaces/students/muthuraki/rlds_dataset_builder/language_instructions/dark_blue_cylinder.txt')
-            green_cyl = self._load_instructions('/mnt/cluster/workspaces/students/muthuraki/rlds_dataset_builder/language_instructions/green_cylinder.txt')
 
             for i, ep_path in enumerate(csv_paths):
                 base_dir = os.path.dirname(ep_path)
-                language_instruction = self._select_instruction(i, green_cube, green_cyl, dark_blue_cyl)
+                language_instruction = self._select_instruction(i)
 
                 df = pd.read_csv(ep_path)
                 initial_pos = df.loc[0, ['relative_tip_position_x', 'relative_tip_position_y', 'relative_tip_position_z']].values.astype(np.float32)
@@ -67,20 +70,15 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
         self._embed = hub.load("https://tfhub.dev/google/universal-sentence-encoder-large/5")
 
     @staticmethod
-    def _load_instructions(path: str) -> List[str]:
-        with open(path, 'r') as f:
-            return [line.strip() for line in f if line.strip()]
-
-    @staticmethod
-    def _select_instruction(index: int, green_cube: List[str], green_cyl: List[str], dark_blue_cyl: List[str]) -> str:
+    def _select_instruction(index: int) -> str:
         if 0 <= index <= 19:
-            return random.choice(green_cube)
+            return "Insert the white thread into the round hole of the green cylinder"
         elif 20 <= index <= 39:
-            return random.choice(dark_blue_cyl)
+            return "Insert the white thread into the round hole of the dark blue cylinder"
         elif 40 <= index <= 59:
-            return random.choice(green_cyl)
+            return "Insert the white thread into the square hole of green cube"
         else:
-            return "Insert the thread into the hole"
+            return "Insert the thread into the hole of the block"
 
     def _info(self) -> tfds.core.DatasetInfo:
         return self.dataset_info_from_configs(
@@ -107,9 +105,11 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager: tfds.download.DownloadManager):
+        # Use 90% of episodes for training, 10% for validation
+        train_end = int(self.num_episodes * 0.9)
         return {
-            'train': self._generate_examples(start_epi=0, end_epi=self.num_episodes - 1),
-            'validation': self._generate_examples(start_epi=self.num_episodes - 1, end_epi=self.num_episodes),
+            'train': self._generate_examples(start_epi=0, end_epi=train_end),
+            'validation': self._generate_examples(start_epi=train_end, end_epi=self.num_episodes),
         }
 
     def _generate_examples(self, start_epi: int, end_epi: int) -> Iterator[Tuple[str, Any]]:
@@ -175,7 +175,7 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                 }
                 steps.append(step)
 
-            split_name = "validation" if epi == self.num_episodes - 1 else "train"
+            split_name = "validation" if epi >= int(self.num_episodes * 0.9) else "train"
             yield f"{split_name}_episode_{epi:03d}", {
                 'steps': steps,
                 'episode_metadata': {
