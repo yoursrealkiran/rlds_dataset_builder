@@ -10,18 +10,18 @@ sys.path.append("/mnt/cluster/workspaces/students/muthuraki/master_thesis/rlds_d
 from  new_dataset_builder import ThreadInHoleDataset
 
 # === STEP 3: Instantiate the builder ===
-data_dir = "/mnt/cluster/workspaces/students/muthuraki/master_thesis/rlds_datasets/octo/version_23/"
+data_dir = "/mnt/cluster/workspaces/students/muthuraki/master_thesis/rlds_datasets/octo/version_24/"
 builder = ThreadInHoleDataset(data_dir=data_dir)
 
 # === STEP 4: Load (no need to rebuild if already built) ===
 # builder.download_and_prepare()  # Only needed if not yet built
 
 # === STEP 5: Load the dataset ===
-ds = builder.as_dataset(split='train', shuffle_files=False) # Use it when you wanna view train dataset (target_episode_index start from 0)
-#ds = builder.as_dataset(split='validation', shuffle_files=False) # Use it when you wanna view validation dataset (target_episode_index from 0)
+#ds = builder.as_dataset(split='train', shuffle_files=False) # Use it when you wanna view train dataset (target_episode_index start from 0)
+ds = builder.as_dataset(split='val', shuffle_files=False) # Use it when you wanna view validation dataset (target_episode_index from 0)
 
 # === Choose the episode index you want to inspect ===
-target_episode_index = 1  # Change this to any episode number you want
+target_episode_index = 0  # Change this to any episode number you want
 
 # === Iterate until the desired episode is reached ===
 for i, episode in enumerate(ds):

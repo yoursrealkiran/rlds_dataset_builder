@@ -109,7 +109,7 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
         train_end = int(self.num_episodes * 0.9)
         return {
             'train': self._generate_examples(start_epi=0, end_epi=train_end),
-            'validation': self._generate_examples(start_epi=train_end, end_epi=self.num_episodes),
+            'val': self._generate_examples(start_epi=train_end, end_epi=self.num_episodes),
         }
 
     def _generate_examples(self, start_epi: int, end_epi: int) -> Iterator[Tuple[str, Any]]:
@@ -175,7 +175,7 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                 }
                 steps.append(step)
 
-            split_name = "validation" if epi >= int(self.num_episodes * 0.9) else "train"
+            split_name = "val" if epi >= int(self.num_episodes * 0.9) else "train"
             yield f"{split_name}_episode_{epi:03d}", {
                 'steps': steps,
                 'episode_metadata': {
