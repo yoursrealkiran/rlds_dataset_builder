@@ -17,19 +17,14 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
 
     def __init__(self, *args, episodes_config: Optional[List[Dict]] = None,
                  **kwargs):
-        # Automatically discover all episode CSVs and set num_episodes accordingly
-        csv_paths = sorted(glob.glob('/mnt/cluster/datasets/thread_in_hole/v4/*/episode.csv', recursive=True))
+        # UPDATED: two-level pattern: color/episode_dir/episode.csv
+        csv_paths = sorted(
+            glob.glob('/mnt/cluster/temp/ariel/thread_in_hole/simulation_v1_mod/*/*/episode.csv',
+                      recursive=True)
+        )
         if not csv_paths:
             raise FileNotFoundError("No episode CSV files found at specified path.")
-
         self.num_episodes = len(csv_paths)
-
-        # Define three fixed instructions for three episode groups
-        # self.fixed_instructions = [
-        #     "Insert the white thread into the round hole of the green cylinder",
-        #     "Insert the white thread into the round hole of the dark blue cylinder",
-        #     "Insert the white thread into the square hole of green cube",
-        # ]
 
         if episodes_config is not None:
             if len(episodes_config) != self.num_episodes:
@@ -37,17 +32,16 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             self.episodes_config = episodes_config
         else:
             self.episodes_config = []
-
-            for i, ep_path in enumerate(csv_paths):
-                base_dir = os.path.dirname(ep_path)
-                language_instruction = self._select_instruction(i)
+            for ep_path in csv_paths:
+                # Base dir is the per-episode directory (contains images and episode.csv)
+                episode_dir = os.path.dirname(ep_path)
+                language_instruction = self._select_instruction_from_path(ep_path)
 
                 df = pd.read_csv(ep_path)
                 initial_pos = df.loc[0, ['relative_tip_position_x', 'relative_tip_position_y', 'relative_tip_position_z']].values.astype(np.float32)
                 pos_cols = ['relative_tip_position_x', 'relative_tip_position_y', 'relative_tip_position_z']
                 # State values from first step padded to 8 dims
                 state_values_first_step = (df[pos_cols].astype(np.float32).values - initial_pos)[0].tolist() + [0, 0, 0, 0, 0]
-
                 # Action delta from first step or zeros if no next step
                 if len(df) > 1:
                     next_pos = df[pos_cols].shift(-1).fillna(0.0).values
@@ -58,7 +52,7 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
 
                 episode_cfg = {
                     'csv_path': ep_path,
-                    'left_img_base_dir': base_dir,
+                    'left_img_base_dir': episode_dir,
                     'language_instruction': language_instruction,
                     'state_values_first_step': state_values_first_step,
                     'action_delta_first_step': action_delta_first_step,
@@ -71,22 +65,35 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
 
     @staticmethod
     def _select_instruction(index: int) -> str:
-        if 0 <= index <= 19:
-            return "Insert the white thread into the round hole of the green cylinder"
-        elif 20 <= index <= 39:
-            return "Insert the white thread into the round hole of the dark blue cylinder"
-        elif 40 <= index <= 59:
-            return "Insert the white thread into the square hole of green cube"
+        # Unused; kept for backward compatibility
+        if 0 <= index <= 29:
+            return "Insert the red thread into the round hole of the white cylinder"
+        elif 30 <= index <= 59:
+            return "Insert the red thread into the round hole of the yellow cylinder"
+        elif 60 <= index <= 89:
+            return "Insert the red thread into the round hole of green cylinder"
         else:
-            return "Insert the thread into the hole of the block"
+            return "Insert the thread into the hole of the cylinder block"
+
+    @staticmethod
+    def _select_instruction_from_path(ep_path: str) -> str:
+        # UPDATED: infer task from the color folder (two levels up from episode.csv)
+        # .../simulation_v1_mod/<color>/<episode_dir>/episode.csv
+        color_dir = os.path.basename(os.path.dirname(os.path.dirname(ep_path))).lower()
+        if 'white' in color_dir:
+            return "Insert the red thread into the round hole of the white cylinder"
+        if 'yellow' in color_dir:
+            return "Insert the red thread into the round hole of the yellow cylinder"
+        if 'green' in color_dir:
+            return "Insert the red thread into the round hole of green cylinder"
+        return "Insert the thread into the hole of the cylinder block"
 
     def _info(self) -> tfds.core.DatasetInfo:
         return self.dataset_info_from_configs(
             features=tfds.features.FeaturesDict({
                 'steps': tfds.features.Dataset({
                     'observation': tfds.features.FeaturesDict({
-                        'left_img': tfds.features.Image(shape=(270, 480, 3), dtype=np.uint8, encoding_format='png'),
-                        'right_img': tfds.features.Image(shape=(270, 480, 3), dtype=np.uint8, encoding_format='png'),
+                        'input_img': tfds.features.Image(shape=(512, 512, 3), dtype=np.uint8, encoding_format='png'),
                         'state': tfds.features.Tensor(shape=(8,), dtype=np.float32),
                     }),
                     'action': tfds.features.Tensor(shape=(7,), dtype=np.float32),
@@ -105,15 +112,40 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
         )
 
     def _split_generators(self, dl_manager: tfds.download.DownloadManager):
-        # Use 90% of episodes for training, 10% for validation
-        train_end = int(self.num_episodes * 0.9)
+        # UPDATED: stratify by color folder to get 10% per color in val
+        # Build per-color index groups
+        groups: Dict[str, List[int]] = {'white': [], 'yellow': [], 'green': [], 'other': []}
+        for idx, cfg in enumerate(self.episodes_config):
+            color_dir = os.path.basename(os.path.dirname(os.path.dirname(cfg['csv_path']))).lower()
+            if 'white' in color_dir:
+                groups['white'].append(idx)
+            elif 'yellow' in color_dir:
+                groups['yellow'].append(idx)
+            elif 'green' in color_dir:
+                groups['green'].append(idx)
+            else:
+                groups['other'].append(idx)
+
+        # Deterministic selection: last k from each group
+        val_indices: List[int] = []
+        for color, idxs in groups.items():
+            if not idxs:
+                continue
+            idxs_sorted = sorted(idxs)
+            k = max(1, int(0.1 * len(idxs_sorted)))
+            val_indices.extend(idxs_sorted[-k:])
+
+        all_indices = list(range(self.num_episodes))
+        val_set = set(val_indices)
+        train_indices = [i for i in all_indices if i not in val_set]
+
         return {
-            'train': self._generate_examples(start_epi=0, end_epi=train_end),
-            'val': self._generate_examples(start_epi=train_end, end_epi=self.num_episodes),
+            'train': self._generate_examples(indices=train_indices, split_name='train'),
+            'val': self._generate_examples(indices=val_indices, split_name='val'),
         }
 
-    def _generate_examples(self, start_epi: int, end_epi: int) -> Iterator[Tuple[str, Any]]:
-        def load_image(path, target_size=(270, 480)):
+    def _generate_examples(self, indices: List[int], split_name: str) -> Iterator[Tuple[str, Any]]:
+        def load_image(path, target_size=(512, 512)):
             if not os.path.exists(path):
                 raise FileNotFoundError(f"Image not found: {path}")
             image = tf.io.read_file(path)
@@ -122,7 +154,7 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             image = tf.cast(tf.clip_by_value(tf.round(image), 0, 255), tf.uint8)
             return image.numpy()
 
-        for epi in range(start_epi, end_epi):
+        for epi in indices:
             cfg = self.episodes_config[epi]
             df = pd.read_csv(cfg["csv_path"])
             initial_pos = df.loc[0, ['relative_tip_position_x', 'relative_tip_position_y', 'relative_tip_position_z']].values.astype(np.float32)
@@ -136,10 +168,8 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
             base_dir = cfg["left_img_base_dir"]
 
             for i, row in df.iterrows():
-                left_img_path = os.path.join(base_dir, row['frameLeftRectifiedPath'])
-                right_img_path = os.path.join(base_dir, row['frameRightRectifiedPath'])
-                left_img = load_image(left_img_path)
-                right_img = load_image(right_img_path)
+                img_path = os.path.join(base_dir, row['frameLeftRectifiedPath'])
+                input_img = load_image(img_path)
 
                 state = np.array([
                     row['relative_tip_position_x'],
@@ -160,8 +190,7 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
 
                 step = {
                     'observation': {
-                        'left_img': left_img,
-                        'right_img': right_img,
+                        'input_img': input_img,
                         'state': state,
                     },
                     'action': action_delta,
@@ -175,7 +204,6 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                 }
                 steps.append(step)
 
-            split_name = "val" if epi >= int(self.num_episodes * 0.9) else "train"
             yield f"{split_name}_episode_{epi:03d}", {
                 'steps': steps,
                 'episode_metadata': {
