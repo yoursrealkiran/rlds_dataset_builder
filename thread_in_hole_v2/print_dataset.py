@@ -10,18 +10,18 @@ sys.path.append("/mnt/cluster/workspaces/students/muthuraki/master_thesis/rlds_d
 from  new_dataset_builder import ThreadInHoleDataset
 
 # === STEP 3: Instantiate the builder ===
-data_dir = "/mnt/cluster/workspaces/students/muthuraki/master_thesis/rlds_datasets/octo/version_24/"
+data_dir = "/mnt/cluster/workspaces/students/muthuraki/master_thesis/rlds_datasets/octo/version_25/"
 builder = ThreadInHoleDataset(data_dir=data_dir)
 
 # === STEP 4: Load (no need to rebuild if already built) ===
 # builder.download_and_prepare()  # Only needed if not yet built
 
 # === STEP 5: Load the dataset ===
-#ds = builder.as_dataset(split='train', shuffle_files=False) # Use it when you wanna view train dataset (target_episode_index start from 0)
-ds = builder.as_dataset(split='val', shuffle_files=False) # Use it when you wanna view validation dataset (target_episode_index from 0)
+ds = builder.as_dataset(split='train', shuffle_files=False) # Use it when you wanna view train dataset (target_episode_index start from 0)
+#ds = builder.as_dataset(split='val', shuffle_files=False) # Use it when you wanna view validation dataset (target_episode_index from 0)
 
 # === Choose the episode index you want to inspect ===
-target_episode_index = 0  # Change this to any episode number you want
+target_episode_index = 7  # Change this to any episode number you want
 
 # === Iterate until the desired episode is reached ===
 for i, episode in enumerate(ds):
@@ -31,8 +31,7 @@ for i, episode in enumerate(ds):
 
         for j, step in enumerate(episode['steps']):
             obs = step['observation']
-            left_img = obs['left_img'].numpy()
-            right_img = obs['right_img'].numpy()
+            input_img = obs['input_img'].numpy()
             state = obs['state'].numpy()
             action = step['action'].numpy()
             instruction = step['language_instruction'].numpy().decode()
@@ -45,18 +44,15 @@ for i, episode in enumerate(ds):
             print("Reward:", step['reward'].numpy())
             print("Is Terminal:", step['is_terminal'].numpy())
 
-            # Visualize stereo images
-            fig, axs = plt.subplots(1, 2, figsize=(8, 3))
-            axs[0].imshow(left_img)
-            axs[0].set_title('Left Image')
-            axs[0].axis('off')
-
-            axs[1].imshow(right_img)
-            axs[1].set_title('Right Image')
-            axs[1].axis('off')
+            # Visualize single image
+            fig, ax = plt.subplots(1, 1, figsize=(4, 4))
+            ax.imshow(input_img)
+            ax.set_title('Input Image')
+            ax.axis('off')
             plt.show()
 
-            if j >= 60:  # Limit to 60 steps
+
+            if j >= 200:  # Limit to 60 steps
                 break
 
         break  # Exit loop after desired episode is processed

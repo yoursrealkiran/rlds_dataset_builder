@@ -1,6 +1,6 @@
 from new_dataset_builder import ThreadInHoleDataset
 
-builder = ThreadInHoleDataset(data_dir='/mnt/cluster/workspaces/students/muthuraki/master_thesis/rlds_datasets/octo/version_24/')
+builder = ThreadInHoleDataset(data_dir='/mnt/cluster/workspaces/students/muthuraki/master_thesis/rlds_datasets/octo/version_25/')
 builder.download_and_prepare()
 
 ds_train = builder.as_dataset(split='train', shuffle_files=True)
