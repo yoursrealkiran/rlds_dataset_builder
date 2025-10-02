@@ -19,7 +19,7 @@ class ThreadInHoleDataset(tfds.core.GeneratorBasedBuilder):
                  **kwargs):
         # UPDATED: two-level pattern: color/episode_dir/episode.csv
         csv_paths = sorted(
-            glob.glob('/mnt/cluster/temp/ariel/thread_in_hole/simulation_v1_mod/*/*/episode.csv',
+            glob.glob('/mnt/cluster/temp/ariel/thread_in_hole/simulation_v3_mod/*/*/episode.csv',
                       recursive=True)
         )
         if not csv_paths:
